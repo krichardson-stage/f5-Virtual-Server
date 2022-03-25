@@ -1,0 +1,54 @@
+---
+- hosts: all
+  gather_facts: false
+  connection: local
+  
+  vars_prompt:
+    - name: ansible_user
+      prompt: username
+      private: no
+    - name: ansible_password
+      prompt: Password
+      private: yes
+
+  vars:
+    provider:
+      user: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      server: "{{ inventory_hostname }}"
+      validate_certs: no
+      server_port: 443
+
+  tasks:
+    - block: # Provides assertion that second block will only run on the Active unit.
+      - name: Show Active Status
+        raw: show /cm failover-status
+        register: failover
+
+      - name: Active Status Assertion
+        ansible.builtin.assert:
+          that: "'ACTIVE' in failover.stdout_lines[5]"
+
+    - block: # Add a virtual server without a pool or nodes
+      - name: Virtual Server Add
+        bigip_virtual_server:
+          provider: "{{ provider }}"
+          state: "{{ item.state }}" 
+          name: "{{ item.name }}"
+          destination: "{{ item.destination }}"
+          port: "{{ item.port }}"
+          partition: "{{ item.partition }}"
+          irules: "{{ item.irules }}"
+          profiles: "{{ item.profiles }}"
+          snat: "{{ item.snat }}"
+          pool: "{{ item.pool }}"
+        delegate_to: localhost
+        loop:
+          - "{{ config }}"
+
+    - block: # Save system configuration and sync to group
+      - name: Save Configuration and Sync to Standby
+        raw: "{{ item }}"
+        loop:
+          - save /sys config
+          - run /cm config-sync to-group "{{ sync_group }}"
